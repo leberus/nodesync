@@ -45,15 +45,12 @@ struct watch_instance {
         char *r_args;
         char **excludes;
         struct rnode_t *rnode;
-        struct rnode_t *c_node;
         struct watch_instance *next;
 };
 
-struct watch_instance *c_p = NULL;;
-
 
 int set_wpath(struct watch_instance *w, char *value);
-int set_remode_node(struct watch_instance *w, char *value);
+int set_remote_node(struct watch_instance *w, char *value);
 int set_exclude_dir(struct watch_instance *w, char *value);
 int set_logfile(struct watch_instance *w, char *value);
 int set_backup_directory(struct watch_instance *w, char *value);
@@ -66,7 +63,7 @@ struct directives_t {
 	const char *desc;
 } directives[] = {	
 	{"wpath", set_wpath, "Path to watch"},
- 	{"rnodes", set_remode_node, "Remote nodes where the sync is done"},
+ 	{"rnodes", set_remote_node, "Remote nodes where the sync is done"},
 	{"excludes", set_exclude_dir, "Which directories are excluded"},
 	{"logfile", set_logfile, "File where application will log"},
 	{"local_backup_directory", set_backup_directory, "Local directory where the files will be backup"},
@@ -104,29 +101,30 @@ int set_r_args(struct watch_instance *w, char *value)
 	return 0;
 }
 
-int set_remode_node(struct watch_instance *x, char *value)
+int set_remote_node(struct watch_instance *x, char *value)
 {
 
 	struct rnode_t *rnode;
+	char *node;
+	char *dir;
 
 	printf("Set remote\n");
+	printf("[set_remote_node] > adding \"%s\"...\n", value);
 
 	rnode = new_rnode();
+	node = strtok(value, ":");
+	dir = strtok(NULL, ":");
+	rnode->node = strdup(node);
+	rnode->dir = strdup(dir);
 
-	/******
-		Fix the bug
-	******/
-
-	if(x->c_node == NULL)
-		x->c_node = rnode; 
-	else {
-		x->c_node->next = rnode;
+	if(x->rnode == NULL) {
+		rnode->next = NULL;
+		x->rnode = rnode;
+	} else {
+		rnode->next = x->rnode;
 		x->rnode = rnode;
 	}
 
-	printf("[set_remote_node] > adding \"%s\"...\n", value);
-	x->rnode->node = strtok(value, ":");
-	x->rnode->dir = strtok(NULL, ":");
 	printf("[set_remote_node] > node (%s)\n", x->rnode->node);
         printf("[set_remote_node] > dir (%s)\n", x->rnode->dir);
 	printf("[set_remote_node] > added\n");
@@ -204,23 +202,32 @@ void walk_through(struct watch_instance *w)
 
 }
 
+void add_instance(struct watch_instance **w, struct watch_instance *x)
+{
+	if(*w == NULL) {
+		x->next = NULL;
+		*w = x;
+	} else {
+		x->next = *w;
+		*w = x;
+	}
+}
 
-struct watch_instance *init_instance(void)
+
+struct watch_instance *init_new_instance(void)
 {
 	struct watch_instance *p;
 
 	p = new_instance();
-	if(c_p == NULL)
-		c_p = p;
-	else {
-		c_p->next = p;
-		c_p = p;
-	}
 
 	p->n_nodes = 0;
 	p->n_excludes = 0;
-	p->next = NULL;
-	p->c_node = p->rnode = NULL;
+	p->wpath = NULL;
+	p->logfile = NULL;
+	p->backup_dir = NULL;
+	p->r_args = NULL;
+	p->excludes = NULL;
+	p->rnode = NULL;
 	return p;
 }
 
@@ -383,17 +390,14 @@ int mygetline(int fd)
 						goto fatal_error;
 					}					
 
-					x = init_instance();
-					if(!w)
-						w = x;
+					x = init_new_instance();
+					add_instance(&w, x);
 					
 				} else {
                                 	if(cfg_directive == NONE || cfg_directive == GLOB_CFG) {
                                         	fprintf(stderr, "Error in line %d: directive \"%s\" not recognized\n", nl, directive);
 	                                        goto fatal_error;
         	                        }
-/*					if(cfg_directive != DELAY)
-						printf("[Directive] > %s (%s)\n", directive, directives[cfg_directive].name);*/
 				}
 
                                 p--;
@@ -410,9 +414,9 @@ int mygetline(int fd)
 				strncpy(option, ap, len);
 				option[len] = '\0';
 		
-				if(cfg_directive != DELAY) 
-					directives[cfg_directive].add_value(x, option);	
-
+				if(cfg_directive != DELAY) {
+					directives[cfg_directive].add_value(x, option);
+					
 				p--;
 				continue;
 			}	
