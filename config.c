@@ -276,7 +276,7 @@ int is_valid_key(char c)
         return (c != ' ' && c != '\t' && c != '\n');
 }
 
-int mygetline(int fd)
+struct watch_instance *load_cfg(int fd)
 {
 	int len;
         int bytes;
@@ -414,7 +414,7 @@ int mygetline(int fd)
 				strncpy(option, ap, len);
 				option[len] = '\0';
 		
-				if(cfg_directive != DELAY) {
+				if(cfg_directive != DELAY) 
 					directives[cfg_directive].add_value(x, option);
 					
 				p--;
@@ -426,18 +426,18 @@ int mygetline(int fd)
 	
 	walk_through(w);
         free(buffer);
-        return bytes;
+        return w;
 
 	fatal_error:
 		printf("Fatal error\n");
 		free(buffer);
-		return -1;
+		return NULL;
 }
 
 
 int main(void)
 {
-
+	struct watch_instance *w_cfg;
 	int fd;
 	cfg_option i;
 
@@ -447,7 +447,7 @@ int main(void)
 		return -1;
 	}
 
-	mygetline(fd);	
+	w_cfg = load_cfg(fd);	
 
 	close(fd);
 	return 0;
