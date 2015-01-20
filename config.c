@@ -5,85 +5,57 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include "config.h"
 
 #define DEFAULT_DELAY	180
-
 
 const char *cfg_file = "nodesync.conf";
 int delay = DEFAULT_DELAY;
 
-typedef enum {
-        GET_GLOBAL_KEY,
-        GET_LOCAL_KEY,
-        GET_PAIR,
-}cfg_state;
 
-typedef enum {
-        W_PATH,
-        RNODES,
-        EXCLUDES,
-        LOG_FILE,
-        BACKUP_DIR,
-        R_ARGS,
-        DELAY,
-        GLOB_CFG,
-        NONE
-}cfg_option;
-
-struct rnode_t {
-        char *node;
-        char *dir;
-        struct rnode_t *next;
-};
-
-struct watch_instance {
-        int n_nodes;
-        int n_excludes;
-        char *wpath;
-        char *logfile;
-        char *backup_dir;
-        char *r_args;
-        char **excludes;
-        struct rnode_t *rnode;
-        struct watch_instance *next;
-};
-
-
-int set_wpath(struct watch_instance *w, char *value);
-int set_remote_node(struct watch_instance *w, char *value);
-int set_exclude_dir(struct watch_instance *w, char *value);
-int set_logfile(struct watch_instance *w, char *value);
-int set_backup_directory(struct watch_instance *w, char *value);
-int set_r_args(struct watch_instance *w, char *value);
-
-
-struct directives_t {
-	const char *name;
-	int (*add_value)(struct watch_instance *w, char *value);
-	const char *desc;
-} directives[] = {	
-	{"wpath", set_wpath, "Path to watch"},
- 	{"rnodes", set_remote_node, "Remote nodes where the sync is done"},
-	{"excludes", set_exclude_dir, "Which directories are excluded"},
-	{"logfile", set_logfile, "File where application will log"},
-	{"local_backup_directory", set_backup_directory, "Local directory where the files will be backup"},
-	{"r_args", set_r_args, "Arguments for rysnc"}
-};
-
-
-struct rnode_t *new_rnode(void)
+static struct rnode_t *new_rnode(void)
 {
         return (struct rnode_t *)malloc(sizeof(struct rnode_t));
 }
 
 
-struct watch_instance *new_instance(void)
+static struct watch_instance *new_instance(void)
 {
         return (struct watch_instance *)malloc(sizeof(struct watch_instance));
 }
 
 
-int set_wpath(struct watch_instance *w, char *value)
+static struct watch_instance *init_new_instance(void)
+{
+        struct watch_instance *p;
+
+        p = new_instance();
+
+        p->n_nodes = 0;
+        p->n_excludes = 0;
+        p->wpath = NULL;
+        p->logfile = NULL;
+        p->backup_dir = NULL;
+        p->r_args = NULL;
+        p->excludes = NULL;
+        p->rnode = NULL;
+        return p;
+}
+
+
+static void add_instance(struct watch_instance **w, struct watch_instance *x)
+{
+        if(*w == NULL) {
+                x->next = NULL;
+                *w = x;
+        } else {
+                x->next = *w;
+                *w = x;
+        }
+}
+
+
+static int set_wpath(struct watch_instance *w, char *value)
 {
 	printf("[set_wpath] > adding \"%s\"...\n", value);
 	w->wpath = strdup(value);
@@ -92,7 +64,8 @@ int set_wpath(struct watch_instance *w, char *value)
 	return 0;
 }
 
-int set_r_args(struct watch_instance *w, char *value)
+
+static int set_r_args(struct watch_instance *w, char *value)
 {
 	printf("[set_r_args] > adding \"%s\"...\n", value);
 	w->r_args = strdup(value);
@@ -101,7 +74,8 @@ int set_r_args(struct watch_instance *w, char *value)
 	return 0;
 }
 
-int set_remote_node(struct watch_instance *x, char *value)
+
+static int set_remote_node(struct watch_instance *x, char *value)
 {
 
 	struct rnode_t *rnode;
@@ -133,7 +107,7 @@ int set_remote_node(struct watch_instance *x, char *value)
 }
 
 
-int set_exclude_dir(struct watch_instance *w, char *value)
+static int set_exclude_dir(struct watch_instance *w, char *value)
 {
 	printf("[set_exclude_dir] > adding \"%s\"...\n", value);
 
@@ -151,7 +125,7 @@ int set_exclude_dir(struct watch_instance *w, char *value)
 }
 
 
-int set_logfile(struct watch_instance *w, char *value)
+static int set_logfile(struct watch_instance *w, char *value)
 {
 	printf("[set_logfile] > adding \"%s\"...\n", value);
 	w->logfile = strdup(value);
@@ -161,13 +135,60 @@ int set_logfile(struct watch_instance *w, char *value)
 }
 
 
-int set_backup_directory(struct watch_instance *w, char *value)
+static int set_backup_directory(struct watch_instance *w, char *value)
 {
 	printf("[set_backup_directory] > adding \"%s\"...\n", value);
 	w->backup_dir = strdup(value);
 	printf("[set_backup_directory] > added\n");
 
 	return 0;
+}
+
+
+static int get_size(int fd)
+{
+        struct stat st;
+
+        if(fstat(fd, &st) == 0)
+                return st.st_size;
+}
+
+
+static cfg_option check_directive(const char *directive)
+{
+        if(strcmp(directive, "watch_config") == 0)
+                return GLOB_CFG;
+        else if(strcmp(directive, "wpath") == 0)
+                return W_PATH;
+        else if(strcmp(directive, "excludes") == 0)
+                return EXCLUDES;
+        else if(strcmp(directive, "rnodes") == 0)
+                return RNODES;
+        else if(strcmp(directive, "logfile") == 0)
+                return LOG_FILE;
+        else if(strcmp(directive, "local_backup_directory") == 0)
+                return BACKUP_DIR;
+        else if(strcmp(directive, "edelay") == 0)
+                return DELAY;
+        else if(strcmp(directive, "args") == 0)
+                return R_ARGS;
+        else
+                return NONE;
+}
+
+
+static int is_valid_pair(char c, int quoted)
+{
+        if(c == ' ' && quoted)
+                return 1;
+        else
+                return (c != ',' && c != '\n' && c != '}' && c != '"' && c != ' ' && c != '\t');
+}
+
+
+static int is_valid_key(char c)
+{
+        return (c != ' ' && c != '\t' && c != '\n');
 }
 
 
@@ -202,83 +223,23 @@ void walk_through(struct watch_instance *w)
 
 }
 
-void add_instance(struct watch_instance **w, struct watch_instance *x)
+
+void clean_cfg(struct watch_instance **w)
 {
-	if(*w == NULL) {
-		x->next = NULL;
-		*w = x;
-	} else {
-		x->next = *w;
-		*w = x;
+	struct watch_instance *x;
+
+	while(*w != NULL) {
+		x = *w;
+		*w = x->next;
+		free(x);
 	}
 }
-
-
-struct watch_instance *init_new_instance(void)
-{
-	struct watch_instance *p;
-
-	p = new_instance();
-
-	p->n_nodes = 0;
-	p->n_excludes = 0;
-	p->wpath = NULL;
-	p->logfile = NULL;
-	p->backup_dir = NULL;
-	p->r_args = NULL;
-	p->excludes = NULL;
-	p->rnode = NULL;
-	return p;
-}
-
-
-int get_size(void)
-{
-	struct stat st;
-
-	if(stat(cfg_file, &st) == 0)
-		return st.st_size;
-}
-
-
-cfg_option check_directive(const char *directive)
-{
-	if(strcmp(directive, "watch_config") == 0)
-		return GLOB_CFG;
-	else if(strcmp(directive, "wpath") == 0)
-		return W_PATH;
-	else if(strcmp(directive, "excludes") == 0)
-		return EXCLUDES;
-	else if(strcmp(directive, "rnodes") == 0)
-		return RNODES;
-	else if(strcmp(directive, "logfile") == 0)
-		return LOG_FILE;
-	else if(strcmp(directive, "local_backup_directory") == 0)
-		return BACKUP_DIR;
-	else if(strcmp(directive, "edelay") == 0)
-		return DELAY;
-	else if(strcmp(directive, "args") == 0)
-		return R_ARGS;
-	else
-		return NONE;
-}
-
-int is_valid_pair(char c, int quoted)
-{
-	if(c == ' ' && quoted)
-		return 1;
-	else
-		return (c != ',' && c != '\n' && c != '}' && c != '"' && c != ' ' && c != '\t');
-}
-
-int is_valid_key(char c)
-{
-        return (c != ' ' && c != '\t' && c != '\n');
-}
+			
 
 struct watch_instance *load_cfg(int fd)
 {
 	int len;
+	int size;
         int bytes;
 	int block;
 	int token;
@@ -297,15 +258,19 @@ struct watch_instance *load_cfg(int fd)
 	nl = 1;
 	block = quotes = token = 0;
 	state = GET_GLOBAL_KEY;
-	bytes = get_size();
-	buffer = calloc(bytes + 1, sizeof(char));
+	size = get_size(fd);
+	buffer = calloc(size + 1, sizeof(char));
 
-	bytes = read(fd, buffer, bytes);
+	bytes = read(fd, buffer, size);
+	if(bytes != size) {
+		fprintf(stderr, "Could not read the whole file\n");
+		goto fatal_error;
+	}
 	
 	p = buffer;
 
 	while(*p != '\0') {
-		p += strspn(p, " \t"); /* Skip blank spaces */
+		p += strspn(p, " \t"); 
 		
 		if(*p == '\n') {
 			p++;
@@ -429,26 +394,8 @@ struct watch_instance *load_cfg(int fd)
         return w;
 
 	fatal_error:
-		printf("Fatal error\n");
 		free(buffer);
+		clean_cfg(&w);	
 		return NULL;
 }
 
-
-int main(void)
-{
-	struct watch_instance *w_cfg;
-	int fd;
-	cfg_option i;
-
-	fd = open(cfg_file, O_RDONLY);
-	if(fd == -1) {
-		perror("file");
-		return -1;
-	}
-
-	w_cfg = load_cfg(fd);	
-
-	close(fd);
-	return 0;
-}
