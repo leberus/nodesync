@@ -9,7 +9,6 @@
 
 #define DEFAULT_DELAY	180
 
-const char *cfg_file = "nodesync.conf";
 int delay = DEFAULT_DELAY;
 
 
@@ -388,8 +387,6 @@ struct watch_instance *load_cfg(int fd)
 		}
 	}
 
-	
-	walk_through(w);
         free(buffer);
         return w;
 
