@@ -30,7 +30,6 @@ static struct watch_instance *init_new_instance(void)
 
         p = new_instance();
 
-        p->n_nodes = 0;
         p->n_excludes = 0;
         p->wpath = NULL;
         p->logfile = NULL;

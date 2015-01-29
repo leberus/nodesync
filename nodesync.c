@@ -8,7 +8,35 @@
 #include <sys/inotify.h>
 #include "nodesync.h"
 
-const char *cfg_file_ = "nodesync.conf";
+#define MISSING_ARGUMENT -2
+#define INCORRENT_ARGUMENT -3
+
+const char *prog_name;
+
+
+void missing_argument(void)
+{
+	fprintf(stderr, "%s: missing argument\n", prog_name);
+	exit(MISSING_ARGUMENT);
+}
+
+
+void incorrect_argument(char c)
+{
+	fprintf(stderr, "%s: '%c' is an unknown argument\n", prog_name, c);
+	exit(INCORRENT_ARGUMENT);
+}
+
+
+void print_help(void)
+{
+	printf("%s - usage:\n", prog_name);
+	printf("Arguments:\n");
+	printf("\t-f [config_file] (Config file)\n");
+	printf("\t-h (Help)\n");
+	exit(EXIT_SUCCESS);
+}
+
 
 int check_cfg(struct watch_instance *w_cfg)
 {
@@ -61,14 +89,43 @@ int check_cfg(struct watch_instance *w_cfg)
 	return ret;
 }
 
-int main(void)
+
+int main(int argc, char **argv)
 {
 	struct watch_instance *w_cfg;
+	char *cfg_file;
 	int inotify_fd;
 	int fd;
 	int ret;
+	int opt;
 
-	fd = open(cfg_file_, O_RDONLY);
+	prog_name = argv[0];
+	cfg_file = NULL;
+
+	while((opt = getopt(argc, argv, "f:h")) != -1) {
+		switch(opt) {
+			case 'f':
+				cfg_file = optarg;
+				break;
+			case 'h':
+				print_help();
+				break;
+			case ':':
+				missing_argument();
+				break;
+			case '?':
+				incorrect_argument(opt);
+				break;
+		}
+	}			
+			
+	if(cfg_file == NULL) {
+		fprintf(stderr, "%s: Missing config file\n", prog_name);
+		exit(EXIT_FAILURE);
+	}
+	
+
+	fd = open(cfg_file, O_RDONLY);
 	if(fd == -1) {
 		perror("Error opening config file");
 		return -1;

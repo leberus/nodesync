@@ -8,7 +8,6 @@ struct rnode_t {
 };
 
 struct watch_instance {
-        int n_nodes;
         int n_excludes;
         char *wpath;
         char *logfile;
@@ -17,6 +16,14 @@ struct watch_instance {
         char **excludes;
         struct rnode_t *rnode;
         struct watch_instance *next;
+};
+
+struct __w {
+	int w_id;
+	char *path;
+	char *logfile;
+	char **cmds;
+	struct __w *next;
 };
 
 struct watch_instance *load_cfg(int fd);
