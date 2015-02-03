@@ -7,26 +7,39 @@ struct rnode_t {
         struct rnode_t *next;
 };
 
+struct watch_list {
+	int w_id;
+	char *path;
+	struct watch_list *next;
+};
+
 struct watch_instance {
-        int n_excludes;
         char *wpath;
         char *logfile;
         char *backup_dir;
-        char *r_args;
         char **excludes;
+	char **cmds;
+	struct watch_list *w_list;
+        struct watch_instance *next;
+};
+
+struct config {
+	char *wpath;
+        char *logfile;
+        char *backup_dir;
+        char *rsync_path;
+        char *rsync_args;
+        char **excludes;
+        char **cmds;
+        int n_excludes;
+        int recursive;
+        unsigned int depth;
         struct rnode_t *rnode;
         struct watch_instance *next;
 };
 
-struct __w {
-	int w_id;
-	char *path;
-	char *logfile;
-	char **cmds;
-	struct __w *next;
-};
 
 struct watch_instance *load_cfg(int fd);
-void walk_through(struct watch_instance *w);
+void walk_through(struct watch_instance *w_instance);
 
 #endif
