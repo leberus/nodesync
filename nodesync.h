@@ -32,6 +32,7 @@ struct config {
         char **excludes;
         char **cmds;
         int n_excludes;
+	int n_rnodes;
         int recursive;
         unsigned int depth;
         struct rnode_t *rnode;

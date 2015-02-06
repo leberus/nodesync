@@ -89,10 +89,44 @@ int check_cfg(struct watch_instance *w_cfg)
 	return ret;
 }
 
+struct watch_instance *init_watch(struct config *cfg)
+{
+	struct watch_instance *wl;
+	struct watch_instance *w;
+	struct config *p;
+	int i;
+
+
+	for(p = cfg ; p !=  NULL ; p = p->next) {
+		
+		w->wpath = strdup(p->wpath);
+		w->logfile = strdup(p->logfile);
+		w->backup_dir = strdup(p->backup_dir);
+		
+		w->excludes = malloc(p->n_excludes *(sizeof(char**)));
+	
+		for(i = 0 ; i <= p->n_excludes ; i++)
+			w->excludes[i] = strdup(p->excludes[i]);
+	
+		w->cmd = malloc(p->n_rnodes *(sizeof(char**)));
+
+		for(i = 0 ; i <= p->n_rnodes ; i++) {
+			w->cmd[i] = malloc(512 * sizeof(char));
+			sprintf(w->cmd[i], 512, "%s %s %s %s:%s", 	p->rsync_path,
+									p->rsync_args,
+									p->wpath,
+									p->rnode->node,
+									p->rnode->dir);
+		}
+	}
+
+	return wl;			
+}
 
 int main(int argc, char **argv)
 {
-	struct watch_instance *w_cfg;
+	struct config *w_cfg;
+	struct watch_instance *w;
 	char *cfg_file;
 	int inotify_fd;
 	int fd;
@@ -148,7 +182,8 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
-	inotify_fd = inotify_init();
+	w = init_watch(w_cfg);
+
 	
 	return 0;
 }
