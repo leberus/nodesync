@@ -2,88 +2,102 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/types.h>
+#include "error.h"
 #include "config.h"
 
 #define DEFAULT_DELAY	180
+#define DEFAULT_LOGFILE "nodesync.log"
+
+#define EQ(str1, str2) (strcmp(str1, str2) == 0)
 
 int delay = DEFAULT_DELAY;
 
-
-static struct rnode_t *new_rnode(void)
+static rnode_t cfg_new_rnode(void)
 {
-        return (struct rnode_t *)malloc(sizeof(struct rnode_t));
+        return (rnode_t)malloc(sizeof(struct rnode));
 }
 
 
-static struct watch_instance *new_instance(void)
+static cfg_t cfg_new_item(void)
 {
-        return (struct watch_instance *)malloc(sizeof(struct watch_instance));
+        return (cfg_t)malloc(sizeof(struct config_item));
 }
 
 
-static struct watch_instance *init_new_instance(void)
+static cfg_t cfg_create_item(void)
 {
-        struct watch_instance *p;
+        cfg_t p;
 
-        p = new_instance();
+
+        p = cfg_new_item();
+	check(p , "Could not create the cfg_t structure")
+	if(error_isset)
+		return NULL;
 
         p->n_excludes = 0;
+	p->n_rnodes = 0;
         p->wpath = NULL;
-        p->logfile = NULL;
         p->backup_dir = NULL;
-        p->r_args = NULL;
+        p->rsync_args = NULL;
         p->excludes = NULL;
         p->rnode = NULL;
+
         return p;
 }
 
 
-static void add_instance(struct watch_instance **w, struct watch_instance *x)
+static void cfg_add_item(cfg_t *cfg_l, cfg_t x)
 {
-        if(*w == NULL) {
+        if(*cfg_l == NULL) {
                 x->next = NULL;
-                *w = x;
+                *cfg_l = x;
         } else {
-                x->next = *w;
-                *w = x;
+                x->next = *cfg_l;
+                *cfg_l = x;
         }
 }
 
 
-static int set_wpath(struct watch_instance *w, char *value)
+static int cfg_set_wpath(cfg_t cfg_i, char *value)
 {
-	printf("[set_wpath] > adding \"%s\"...\n", value);
-	w->wpath = strdup(value);
-	printf("[set_wpath] > added\n");
+	debug("> adding (%s)", value);
+	cfg_i->wpath = strdup(value);
+	debug("> added");
 
 	return 0;
 }
 
 
-static int set_r_args(struct watch_instance *w, char *value)
+static int cfg_set_rsync_path(cfg_t cfg_i, char *value)
 {
-	printf("[set_r_args] > adding \"%s\"...\n", value);
-	w->r_args = strdup(value);
-	printf("[set_r_args] > added\n");
+	debug("> adding (%s)", value);
+	cfg_i->rsync_path = strdup(value);
+	debug("> added");
+
+	return 0;
+}
+
+static int cfg_set_rsync_args(cfg_t cfg_i, char *value)
+{
+	debug("> adding (%s)", value);
+	cfg_i->rsync_args = strdup(value);
+	debug("> added");
 
 	return 0;
 }
 
 
-static int set_remote_node(struct watch_instance *x, char *value)
+static int cfg_set_remote_node(cfg_t x, char *value)
 {
 
-	struct rnode_t *rnode;
+	rnode_t rnode;
 	char *node;
 	char *dir;
 
-	printf("Set remote\n");
-	printf("[set_remote_node] > adding \"%s\"...\n", value);
+	debug("> adding (%s)", value);
 
-	rnode = new_rnode();
+	rnode = cfg_new_rnode();
 	node = strtok(value, ":");
 	dir = strtok(NULL, ":");
 	rnode->node = strdup(node);
@@ -97,49 +111,48 @@ static int set_remote_node(struct watch_instance *x, char *value)
 		x->rnode = rnode;
 	}
 
-	printf("[set_remote_node] > node (%s)\n", x->rnode->node);
-        printf("[set_remote_node] > dir (%s)\n", x->rnode->dir);
-	printf("[set_remote_node] > added\n");
+	x->n_rnodes++;
+
+	debug("> node (%s)", x->rnode->node);
+	debug("> dir (%s)", x->rnode->dir);
+	debug("> added");
 
 	return 0;
 }
 
 
-static int set_exclude_dir(struct watch_instance *w, char *value)
+static int cfg_set_exclude_dir(cfg_t cfg_i, char *value)
 {
-	printf("[set_exclude_dir] > adding \"%s\"...\n", value);
+ 	debug("> adding (%s)", value);
 
-	if(w->n_excludes == 0) {
-		w->excludes = malloc(sizeof(char **));
+	if(cfg_i->n_excludes == 0) {
+		cfg_i->excludes = malloc(sizeof(char **));
 	} else {
-		w->excludes = realloc(w->excludes, w->n_excludes + 1);
+		cfg_i->excludes = realloc(cfg_i->excludes, cfg_i->n_excludes + 1);
 	}
 
-	w->excludes[w->n_excludes] = strdup(value);
-	w->n_excludes++;	
-	printf("[set_exclude_dir] > added\n", value);
+	cfg_i->excludes[cfg_i->n_excludes] = strdup(value);
+	cfg_i->n_excludes++;	
+
+ 	debug("> added");
 
 	return 0;
 }
 
 
-static int set_logfile(struct watch_instance *w, char *value)
+static int cfg_set_backup_directory(cfg_t cfg_i, char *value)
 {
-	printf("[set_logfile] > adding \"%s\"...\n", value);
-	w->logfile = strdup(value);
-	printf("[set_logfile] > added\n");
+	debug("> adding (%s)", value);
+	cfg_i->backup_dir = strdup(value);
+	debug("> added");
 
 	return 0;
 }
 
 
-static int set_backup_directory(struct watch_instance *w, char *value)
+static nodesync_f cfg_set_logfile(char *name)
 {
-	printf("[set_backup_directory] > adding \"%s\"...\n", value);
-	w->backup_dir = strdup(value);
-	printf("[set_backup_directory] > added\n");
-
-	return 0;
+        return fopen(name, "wa");
 }
 
 
@@ -147,28 +160,55 @@ static int get_size(int fd)
 {
         struct stat st;
 
-        if(fstat(fd, &st) == 0)
-                return st.st_size;
+	return (fstat(fd, &st) == 0) ? st.st_size : -1;
+}
+
+
+static int directive_is_global(const char *directive)
+{
+	int i;
+	int found;
+
+	for(found = 0, i = 0; glob_directives[i] != NULL && found != 1 ; i++)
+		if(EQ(glob_directives[i], directive))
+			found = 1;
+
+	return found;
+}
+
+
+static int directive_is_local(const char *directive)
+{
+	int i;
+	int found;
+	
+	for(found = 0, i = 0; locl_directives[i] != NULL && found != 1 ; i++)
+		if(EQ(locl_directives[i], directive))
+			found = 1;
+
+	return found;
 }
 
 
 static cfg_option check_directive(const char *directive)
 {
-        if(strcmp(directive, "watch_config") == 0)
+        if(EQ(directive, "watch_config"))
                 return GLOB_CFG;
-        else if(strcmp(directive, "wpath") == 0)
+        else if(EQ(directive, "wpath"))
                 return W_PATH;
-        else if(strcmp(directive, "excludes") == 0)
+        else if(EQ(directive, "excludes"))
                 return EXCLUDES;
-        else if(strcmp(directive, "rnodes") == 0)
+        else if(EQ(directive, "rnodes"))
                 return RNODES;
-        else if(strcmp(directive, "logfile") == 0)
+        else if(EQ(directive, "logfile"))
                 return LOG_FILE;
-        else if(strcmp(directive, "local_backup_directory") == 0)
+        else if(EQ(directive, "local_backup_directory"))
                 return BACKUP_DIR;
-        else if(strcmp(directive, "edelay") == 0)
+        else if(EQ(directive, "edelay"))
                 return DELAY;
-        else if(strcmp(directive, "args") == 0)
+        else if(EQ(directive, "rsync"))
+		return RSYNC;
+        else if(EQ(directive, "args"))
                 return R_ARGS;
         else
                 return NONE;
@@ -190,20 +230,20 @@ static int is_valid_key(char c)
 }
 
 
-void walk_through(struct watch_instance *w)
+#ifdef DEBUG
+void walk_through(cfg_t cfg_i)
 {
-	struct watch_instance *p;
-	struct rnode_t *x;
+	cfg_t p;
+	rnode_t x;
 	int i;
 
-	printf("\n\n =========== \n");
+	printf("\n\n-------------------\n");
 	printf("Dump w structure: \n\n");
 
-	for(p = w; p != NULL ;p = p->next) {
+	for(p = cfg_i; p != NULL ;p = p->next) {
 		printf("wpath > %s\n", p->wpath);
-		printf("logfile > %s\n", p->logfile);
 		printf("backup_dir > %s\n", p->backup_dir);
-		printf("r_args > %s\n", p->r_args);
+		printf("r_args > %s\n", p->rsync_args);
 		
 		for(i = 0; i < p->n_excludes; i++)
 			printf("excludes (%d) > %s\n", i, p->excludes[i]);
@@ -220,11 +260,11 @@ void walk_through(struct watch_instance *w)
 	}
 
 }
+#endif
 
-
-void clean_cfg(struct watch_instance **w)
+void clean_cfg(cfg_t *w)
 {
-	struct watch_instance *x;
+	cfg_t x;
 
 	while(*w != NULL) {
 		x = *w;
@@ -234,8 +274,9 @@ void clean_cfg(struct watch_instance **w)
 }
 			
 
-struct watch_instance *load_cfg(int fd)
+cfg_t load_cfg(int fd)
 {
+	int ret;
 	int len;
 	int size;
         int bytes;
@@ -250,9 +291,9 @@ struct watch_instance *load_cfg(int fd)
 	char *ap;
 	cfg_state state;
 	cfg_option cfg_directive;
-	struct watch_instance *w, *x;
+	cfg_t cfg_i, x;
 
-	w = x = NULL;
+	cfg_i = x = NULL;
 	nl = 1;
 	block = quotes = token = 0;
 	state = GET_GLOBAL_KEY;
@@ -264,6 +305,12 @@ struct watch_instance *load_cfg(int fd)
 		fprintf(stderr, "Could not read the whole file\n");
 		goto fatal_error;
 	}
+
+	logfile = cfg_set_logfile(DEFAULT_LOGFILE);
+	check(logfile, "Could not open the file (%s)", DEFAULT_LOGFILE);
+
+	if(error_isset)
+		goto fatal_error;
 	
 	p = buffer;
 
@@ -346,23 +393,32 @@ struct watch_instance *load_cfg(int fd)
                                 strncpy(directive, ap, len);
                                 directive[len] = '\0';
 				cfg_directive = check_directive(directive);
+				
+				if(cfg_directive == NONE) { 	/* Bad directive */
+					log_err("\"%s\" not recognized as a directive", directive);
+					goto fatal_error;
+				} 
 
-				if(state == GET_GLOBAL_KEY && cfg_directive != DELAY) {
-					if(cfg_directive != GLOB_CFG) {
-						fprintf(stderr, "Error in line %d: directive \"%s\" found out of \"watch_config\" block\n", nl, directive);
+				if(state == GET_GLOBAL_KEY) {	/* Is really global? */
+					ret = directive_is_global(directive);
+					check(ret, "\"%s\" out of scope", directive);
+
+
+					if(error_isset)
 						goto fatal_error;
-					}					
 
-					x = init_new_instance();
-					add_instance(&w, x);
-					
-				} else {
-                                	if(cfg_directive == NONE || cfg_directive == GLOB_CFG) {
-                                        	fprintf(stderr, "Error in line %d: directive \"%s\" not recognized\n", nl, directive);
-	                                        goto fatal_error;
-        	                        }
+					if(cfg_directive == GLOB_CFG) {					
+						x = cfg_create_item();
+						cfg_add_item(&cfg_i, x);
+					}
+
+				} else {			/* Is really local? */
+					ret = directive_is_local(directive);
+					check(ret, "\"%s\" out of scope", directive);
+					if(error_isset)
+						goto fatal_error;	
 				}
-
+						
                                 p--;
                                 continue;
                         }
@@ -377,9 +433,9 @@ struct watch_instance *load_cfg(int fd)
 				strncpy(option, ap, len);
 				option[len] = '\0';
 		
-				if(cfg_directive != DELAY) 
+				if(cfg_directive != DELAY && cfg_directive != LOG_FILE) 
 					directives[cfg_directive].add_value(x, option);
-					
+				
 				p--;
 				continue;
 			}	
@@ -387,11 +443,11 @@ struct watch_instance *load_cfg(int fd)
 	}
 
         free(buffer);
-        return w;
+        return cfg_i;
 
 	fatal_error:
 		free(buffer);
-		clean_cfg(&w);	
+		clean_cfg(&cfg_i);	
 		return NULL;
 }
 

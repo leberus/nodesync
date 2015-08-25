@@ -1,46 +1,62 @@
-#ifndef NODESYNC_H
-#       define NODESYNC_H 
+#ifndef __nodesync_h__
+#define __nodesync_h__
 
-struct rnode_t {
-        char *node;
-        char *dir;
-        struct rnode_t *next;
+struct watch_item {
+	char *parent;
+	char *bname;
+	char *name;
+	char *bin;
+	char **cmd;
+	int type;
+	unsigned int mask;
+	int flags;
+	int watch_id;
+	struct watch_item *next;
 };
+typedef struct watch_item * watch_item_t;
 
-struct watch_list {
-	int w_id;
-	char *path;
-	struct watch_list *next;
-};
+/* char *logfile; */
 
-struct watch_instance {
-        char *wpath;
-        char *logfile;
+struct watch {
+/*      char *logfile;	*/
+	int type;
         char *backup_dir;
         char **excludes;
-	char **cmds;
-	struct watch_list *w_list;
-        struct watch_instance *next;
+	watch_item_t watch_list;
+        struct watch *next;
 };
+typedef struct watch * watch_t;
 
-struct config {
+
+struct rnode {
+        char *node;
+        char *dir;
+        struct rnode *next;
+};
+typedef struct rnode* rnode_t;
+
+
+struct config_item {
 	char *wpath;
-        char *logfile;
         char *backup_dir;
         char *rsync_path;
         char *rsync_args;
         char **excludes;
-        char **cmds;
         int n_excludes;
 	int n_rnodes;
         int recursive;
         unsigned int depth;
-        struct rnode_t *rnode;
-        struct watch_instance *next;
+        rnode_t rnode;
+        struct config_item *next;
 };
+typedef struct config_item* cfg_t;
 
 
-struct watch_instance *load_cfg(int fd);
-void walk_through(struct watch_instance *w_instance);
+cfg_t load_cfg(int fd);
+void walk_through(cfg_t cfg_i);
+
+#define ISDIR	0
+#define ISFILE	1
+
 
 #endif
