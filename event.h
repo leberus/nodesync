@@ -12,11 +12,7 @@
 
 
 #define EVENT_SIZE (sizeof(struct inotify_event))
-#define BUF_LEN_E (EVENT_SIZE + NAME_MAX + 1)
-
-#define F_OPEN	 	0x1
-#define F_CLOSE 	0x10
-#define F_MODIFY 	0x100
+#define BUF_LEN_E (EVENT_SIZE + NAME_MAX + 1)*10
 
 
 struct q_watch_event {

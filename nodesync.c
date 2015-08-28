@@ -66,64 +66,15 @@ FILE *open_file(char *file)
 	return fopen(file, "wa");
 }
 
-int create_dir(char *dir)
+static int create_dir(char *dir)
 {
 	return mkdir(dir, D_PERM);
 }
 
-int create_file(char *file)
-{
-	return creat(file, F_PERM);
-}
-
-int check_cfg(struct config_item *w_cfg)
+static int check_cfg(struct config_item *w_cfg)
 {
 	struct stat st;
 	int ret;
-
-	/* Check for: */
-
-	 /* Log file */
-        /*printf("Checking logfile > %s\n", w_cfg->logfile);
-        ret = access(w_cfg->logfile, F_OK); */
-	/*if(ret) {*/ /* Cannot access to a file: either not exist either we don't have right to check */
-/*		if(errno == EACCES) {
-			fprintf(stderr, "Cannot check for (%s), please check permissions\n", w_cfg->logfile);
-			return RET_F;
-		}
-
-		ret = create_file(w_cfg->logfile);
-		if(ret == -1) {
-			fprintf(stderr, "Could not create the file (%s): %s\n", w_cfg->logfile, strerror(errno));
-			return RET_F;
-		}
-
-		w_cfg->flog = open_file(w_cfg->logfile);
-		if(w_cfg->flog == NULL) {
-			fprintf(stderr, "Could not open the file (%s): %s\n", w_cfg->logfile, strerror(errno));
-			return RET_F;
-		}
-
-	} else { *//* Can access to a file, check if is a regular file and if we have read/write perms for it*/
-/*		ret = stat(w_cfg->logfile, &st);
-		if(ret) {
-			fprintf(stderr, "Could not perform stat on %s\n", w_cfg->logfile);
-			return RET_F;
-		}
-
-		if(!S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode)) {
-			fprintf(stderr, "(%s) is not a file nor a symlink\n", w_cfg->logfile);
-			return RET_F;
-		} else {
-			ret = access(w_cfg->logfile, R_OK|W_OK);
-			if(ret) {
-				fprintf(stderr, "(%s) does not have read/write permissions, please check the file\n", w_cfg->logfile);
-				return RET_F;
-			}
-		}
-	}
-	printf("logfile... OK\n"); */
-
 
 	/* Wpath */
 	printf("Checking wpath > %s\n", w_cfg->wpath);
@@ -216,13 +167,107 @@ void start_the_watch(watch_t w, int inotify_id)
 }
 
 
+static int get_number_args(char **p)
+{
+	int i;
+	int n;
+	int quoted;
+	char *str;
+
+	str = p[0];
+	n = i = quoted = 0;
+	
+	while(str[i] != '\0') {
+		if(str[i] == '"')
+			quoted = quoted ? 0 : 1;
+
+		if(str[i] == ' ' && !quoted)
+			n++;
+		i++;
+	}
+
+	return n;
+}	
+
+
+static int get_next_arg(char *str)
+{
+	int i;
+	int j;
+	int quoted;
+	int is_valid;
+
+	i = j = quoted = 0;
+	is_valid = 1;
+
+	while(str[i] == ' ')
+		i++;
+
+	
+	while(is_valid && str[j] != '\0') {
+		if(str[j] == '(')
+			quoted = 1;
+		if(str[j] == ')')
+			quoted = 0;
+
+		if(str[j] == ' ' && !quoted) {
+			is_valid = 0;
+		}
+
+		j++;
+	}
+
+	return (j-i);
+}
+
+	
+
+
+static char **add_rsync_args(char **all_args)
+{
+	int i;
+	int len;
+	int len_aux;
+	int n_args;
+	char *str;
+	char **p;
+	char **args;
+
+	i = 0;
+	p = all_args;
+
+	str = p[0];
+	n_args = get_number_args(p) + 2;
+
+	args = allocate_object(n_args * sizeof(char *));
+	len_aux = strlen("/usr/bin/rsync");
+	args[i] = allocate_object(len_aux + 1);
+	strncpy(args[i], "/usr/bin/rsync", len_aux);
+	args[i][len_aux] = '\0';
+	
+	log_info("args[%d] : %s", i, args[i]);
+	i++;
+
+	while((len = get_next_arg(str)) != 0) {
+		args[i] = allocate_object(len + 1);
+		strncpy(args[i], str, len);
+		args[i][len-1] = '\0';
+		str += len;
+		i++;
+	}
+	
+	args[i] = NULL;
+
+	return args;
+}
+
+	
 static char **add_rsync_cmd(cfg_t cfg)
 {
 	int i;
 	int len;
 	char **cmd;
 	
-	log_info("n_rnodes > %d", cfg->n_rnodes);
 
 	cmd = allocate_object(sizeof(char *) * (cfg->n_rnodes + 1));
 	if(cmd == NULL)
@@ -239,16 +284,27 @@ static char **add_rsync_cmd(cfg_t cfg)
                 log_info("item->cmd[%d] > %s", i, cmd[i]);
         }
 
-	log_info("i-> %d", i);
 	cmd[i] = NULL;
 	return cmd;
 }
 
+static void print_args(char **args)
+{
+	int i;
+
+	log_info("print args");
+
+	for(i = 0; args[i] != NULL ; i++)
+		printf("%s ", args[i]);
+
+	printf("\n");
+}
 watch_item_t set_watch_list(cfg_t cfg)
 {
         watch_item_t item;
         struct dirent *ep;
         struct stat st;
+	char *cp_str;
 	char *fname;
 	char *dname;
         int watch_d;
@@ -263,14 +319,15 @@ watch_item_t set_watch_list(cfg_t cfg)
                 goto error;
 
         item->name = strdup(cfg->wpath);
+	cp_str = strdup(item->name);
 
-        if(stat(item->name, &st) == -1) {
-                fprintf(stderr, "Could not get a stat call\n");
-                goto error;
-        }
-
+	if(stat(item->name, &st) == -1)
+		goto error;
+	
 	item->bin = strdup(cfg->rsync_path);
 	item->cmd = add_rsync_cmd(cfg);
+	item->args = add_rsync_args(item->cmd);
+	print_args(item->args);
 	check(item->cmd, "add_rsync_cmd failed");
 	if(error_isset)
 		goto error;
@@ -278,11 +335,15 @@ watch_item_t set_watch_list(cfg_t cfg)
         if(S_ISREG(st.st_mode)) {
 
 		item->type =  ISFILE;
-		dname = dirname(item->name);
-		fname = basename(item->name);		
+		
+		fname = basename(cp_str);		
+		dname = dirname(cp_str);
 		item->bname = fname;
 		item->parent = dname;
 		item->flags = 0;
+
+		log_info("item->parent: %s", item->parent);
+		log_info("dname: %s", dname);
 			
                 watch_d = inotify_add_watch(inotify_id, dname, IN_ALL_EVENTS);
                 if(watch_d > 0) {
@@ -334,6 +395,7 @@ void init_watchnode(watch_t w, cfg_t cfg)
 	
 	debug("> entry");
 
+	log_info("init_watchnode: %s", cfg->wpath);
         w->backup_dir = strdup(cfg->backup_dir);
 
 	debug("> quit");
@@ -422,6 +484,10 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
+	ret = add_sig_handlers();
+	if(ret == -1)
+		log_err("add_handlers() failed");
+	
 	inotify_id = inotify_init();
 	watch = create_watchlist(cfg);
 	start_the_watch(watch, inotify_id);

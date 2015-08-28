@@ -12,7 +12,11 @@
 #define CHILD(pid)	(pid == 0)
 #define PARENT(pid) 	(pid > 0)
 
+#define F_OPEN		0x1
+#define F_MODIFY	0x2
+
 extern int inotify_id;
+extern int is_enabled;
 
 static void delete_event(q_wevent_t e)
 {
@@ -73,7 +77,7 @@ static int event_modify(watch_t w)
 	pid = fork();
 	if(pid == 0) {
 		log_info("Executing: %s %s", item->bin, item->cmd[0]);
-/*		ret = execl(item->bin, item->bin, item->cmd[0]);	*/
+		ret = execv(item->bin, item->args);	
 		if(ret == -1) {
 			log_err("execl error");
 			exit(-1);
@@ -87,6 +91,7 @@ static int event_modify(watch_t w)
 		log_info("parent detected child is done...");
 	} else {
 		log_err("fork failed!");
+		return -1;
 	} 
 	
 	return 0;
@@ -126,6 +131,7 @@ static int event_open(watch_t w)
 {
 	struct tm tm_s;
 	time_t t;
+	char *cp;
 	char *str;
 	int len;
 	int ret;
@@ -146,23 +152,16 @@ static int event_open(watch_t w)
 							tm_s.tm_min > 9 ? "" : "0", tm_s.tm_min,
 							tm_s.tm_sec > 9 ? "" : "0", tm_s.tm_sec);
 
-	log_info("File: ( %s )", str);
-
 	orig_mask = get_mask(w->watch_list);
 	new_mask = IN_MOVED_TO;
-	log_info("orig mask %x", orig_mask);
-	log_info("new mask %x", new_mask);
-	log_info("watch_id before %d", w->watch_list->watch_id);
 
 	w->watch_list->watch_id = inotify_add_watch(inotify_id, w->watch_list->parent, new_mask);
-	log_info("watch_id disable %d", w->watch_list->watch_id);
-	check(w->watch_list->watch_id != -1, "Error setting 0 as a mask");
+	check(w->watch_list->watch_id != -1, "Error setting new mask");
 
 	ret = copy_file(w->watch_list->name, str);
 
 	w->watch_list->watch_id =  inotify_add_watch(inotify_id, w->watch_list->parent, IN_ALL_EVENTS);	
-	log_info("watch_id enable %d", w->watch_list->watch_id);
-	check(w->watch_list->watch_id != -1, "Error setting 0 as a mask");
+	check(w->watch_list->watch_id != -1, "Error setting old mask");
 
 	log_info("Copied file (%s)", str);
 
@@ -180,18 +179,18 @@ static void handle_event(q_wevent_t e, watch_t w)
         int wd;
 
         debug("> entry");
-        
+
         if(ievent->mask & IN_ISDIR)
                 is_dir = 1;
         else
                 is_dir = 0;
 
-        log_info("\n\nEvent on %s", ievent->len > 0 ? ievent->name : "Unknown");
+//        log_info("Event on %s", ievent->len > 0 ? ievent->name : "Unknown");
 
         switch(ievent->mask & (IN_ALL_EVENTS | IN_ONESHOT | IN_IGNORED | IN_Q_OVERFLOW | IN_UNMOUNT)) {
 
                 case IN_ACCESS:
-                        log_info("IN_ACCESS on (%d)", ievent->wd);
+//                        log_info("IN_ACCESS on (%d)", ievent->wd);
                         break;
 
                 case IN_MODIFY:
@@ -202,11 +201,11 @@ static void handle_event(q_wevent_t e, watch_t w)
                         break;
 
                 case IN_CLOSE_WRITE:
-                        log_info("IN_CLOSE_WRITE on (%d)", ievent->wd);
+//                        log_info("IN_CLOSE_WRITE on (%d)", ievent->wd);
                         break;
 
                 case IN_CLOSE_NOWRITE:
-                        log_info("IN_CLOSE_NOWRITE on (%d)", ievent->wd);
+//                        log_info("IN_CLOSE_NOWRITE on (%d)", ievent->wd);
                         break;
 
                 case IN_OPEN:
@@ -293,7 +292,7 @@ static int is_our_file(watch_t w, char *filename)
 	int found = 0;
 	
 	while(item != NULL) {
-		if(EQ(item->name, filename)) {
+		if(EQ(item->bname, filename)) {
 			found = 1;
 			break;
 		}
@@ -309,14 +308,23 @@ int get_events(watch_t w, int inotify_id) /* http://www.thegeekstuff.com/2010/04
         q_wevent_t wevent;
         char buffer[BUF_LEN_E] __attribute__ ((aligned(8)));
         size_t event_size, q_event_size;
+	useconds_t usec;
         int events_read;
         int nbytes;
         int rbytes;
+	int flag;
 
         debug("> entry");
-        nbytes = events_read = 0;
+
+	usec = 1000 * 1;
+	usleep(usec);
+	
+        rbytes = nbytes = events_read = flag = 0;
         memset(buffer, '\0', sizeof(buffer));
         rbytes = read(inotify_id, buffer, BUF_LEN_E);
+
+	debug("> rbytes %d", rbytes);
+	debug("> sizeof(buffer) %d", sizeof(buffer));
 
         if(rbytes < 0) {
                 log_err("Could not read from fd (%d)", inotify_id);
@@ -329,14 +337,36 @@ int get_events(watch_t w, int inotify_id) /* http://www.thegeekstuff.com/2010/04
                         struct inotify_event *event = (struct inotify_event *)&buffer[nbytes];
                         event_size = sizeof(struct inotify_event) + event->len;
                         nbytes += event_size;
-			log_info("get_events > mask %x", event->mask);
+
+			if(!is_enabled) {
+				log_info("nodesync is disabled. Discarting event...");
+				continue;
+			}
+				
+
+			if(event->mask & IN_OPEN) {
+				debug("> mask IN_OPEN");
+				if((flag & F_OPEN) || (flag & F_MODIFY))
+					continue;
+				else
+					flag |= F_OPEN;
+			}
+
+			if(event->mask & IN_MODIFY) {
+				debug("> mask IN_OPEN");
+				if(flag & F_MODIFY)
+					continue;
+				else
+					flag |= F_MODIFY;
+			} 
 			
 			if(w->type == ISFILE && (event->mask & IN_ISDIR) == IN_ISDIR) 
 				continue;
 
-			if(w->type == ISFILE && event->len > 0) 
+			if(w->type == ISFILE && event->len > 0) {
 				if(!is_our_file(w, event->name)) 
 					continue;
+			}
 
                         q_event_size = sizeof(struct q_watch_event) + event->len;
                         wevent = malloc(q_event_size);

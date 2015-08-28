@@ -7,6 +7,7 @@ struct watch_item {
 	char *name;
 	char *bin;
 	char **cmd;
+	char **args;
 	int type;
 	unsigned int mask;
 	int flags;
