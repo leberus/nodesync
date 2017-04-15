@@ -1,6 +1,7 @@
 #ifndef __error_h__
 #define __error_h__
 
+
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
